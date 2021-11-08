@@ -8,17 +8,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"log"
-	"time"
 )
 
 // LaptopServer is the server that provides the laptop services.
 type LaptopServer struct {
 	Store LaptopStore
 	pb.UnimplementedLaptopServiceServer
-}
-
-func (server *LaptopServer) mustEmbedUnimplementedLaptopServiceServer() {
-	panic("implement me")
 }
 
 func (server *LaptopServer) CreateLaptop(cxt context.Context, req *pb.CreateLaptopRequest) (*pb.CreateLaptopResponse, error) {
@@ -40,7 +35,7 @@ func (server *LaptopServer) CreateLaptop(cxt context.Context, req *pb.CreateLapt
 	}
 
 	// some heavy processing to satisfy timeout
-	time.Sleep(6*time.Second)
+	//time.Sleep(6*time.Second)
 	// 判断请求是否被取消
 	if cxt.Err() == context.Canceled {
 		log.Print("request is canceled")
@@ -62,11 +57,37 @@ func (server *LaptopServer) CreateLaptop(cxt context.Context, req *pb.CreateLapt
 		return nil, status.Errorf(code, "cannot save laptop to the store: %v", err)
 	}
 
-	log.Printf("sav3ed laptop with id : %s", laptop.Id)
+	log.Printf("saved laptop with id : %s", laptop.Id)
 
 	res := &pb.CreateLaptopResponse{Id: laptop.Id}
 	return res, nil
 }
+
+func (server *LaptopServer) SearchLaptop(req *pb.SearchLaptopRequest,stream pb.LaptopService_SearchLaptopServer) error{
+	filter := req.GetFilter()
+	log.Printf("receive a search-laptop request with filter: %v",filter)
+
+	err := server.Store.Search(
+		stream.Context(), // 传递流上下文
+		filter,
+		func(laptop *pb.Laptop) error {
+			res := &pb.SearchLaptopResponse{Laptop: laptop}
+
+			err := stream.Send(res)
+			if err != nil {
+				return err
+			}
+
+			log.Printf("sent laptop with id: %s", laptop.GetId())
+			return nil
+		},
+	)
+	if err != nil {
+		return status.Errorf(codes.Internal, "unexpected error: %v",err)
+	}
+	return nil
+}
+
 
 func NewLaptopServer(store LaptopStore) *LaptopServer {
 	return &LaptopServer{Store: store}
