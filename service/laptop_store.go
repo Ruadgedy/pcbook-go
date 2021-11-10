@@ -29,6 +29,7 @@ type InMemoryLaptopStore struct {
 	data  map[string]*pb.Laptop
 }
 
+
 func (store *InMemoryLaptopStore) Search(ctx context.Context, filter *pb.Filter, found func(laptop *pb.Laptop) error) error {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()

@@ -18,9 +18,11 @@ const maxImageSize = 1 << 20
 type LaptopServer struct {
 	laptopStore LaptopStore
 	imageStore ImageStore
-	pb.UnimplementedLaptopServiceServer
+	ratingStore RatingStore
+	pb.UnimplementedLaptopServiceServer // UnimplementedLaptopServiceServer must be embedded to have forward compatible implementations.
 }
 
+// 输入unary，输出unary
 func (server *LaptopServer) CreateLaptop(cxt context.Context, req *pb.CreateLaptopRequest) (*pb.CreateLaptopResponse, error) {
 	laptop := req.GetLaptop()
 	log.Printf("receive a create laptop request with id :%s", laptop.Id)
@@ -68,6 +70,7 @@ func (server *LaptopServer) CreateLaptop(cxt context.Context, req *pb.CreateLapt
 	return res, nil
 }
 
+// 输入unary， 输出stream
 func (server *LaptopServer) SearchLaptop(req *pb.SearchLaptopRequest,stream pb.LaptopService_SearchLaptopServer) error{
 	filter := req.GetFilter()
 	log.Printf("receive a search-laptop request with filter: %v",filter)
@@ -93,6 +96,7 @@ func (server *LaptopServer) SearchLaptop(req *pb.SearchLaptopRequest,stream pb.L
 	return nil
 }
 
+// 输入stream，输出unary
 // UploadImage is a client-streaming RPC to upload a laptop image
 func (server *LaptopServer)UploadImage(stream pb.LaptopService_UploadImageServer) error{
 	req, err := stream.Recv()
@@ -174,6 +178,57 @@ func (server *LaptopServer)UploadImage(stream pb.LaptopService_UploadImageServer
 	return nil
 }
 
+// 输入stream，输出stream
+// RateLaptop is a bidirectional-stream RPC that allows client to rate a stream of laptops
+// with a score, and returns a stream of average score for each of them
+func (server *LaptopServer)RateLaptop(stream pb.LaptopService_RateLaptopServer) error{
+	for {
+		err := contextError(stream.Context())
+		if err != nil {
+			return err
+		}
+
+		req, err := stream.Recv()
+		if err == io.EOF {
+			log.Println("no more data")
+			break
+		}
+		if err != nil {
+			return logError(status.Errorf(codes.Unknown, " cannot receive request: %v",err))
+		}
+
+		laptopId := req.GetLaptopId()
+		score := req.GetScore()
+
+		log.Printf("receive a rate-laptop request: id=%s, score=%.2f",laptopId, score)
+
+		found, err := server.laptopStore.Find(laptopId)
+		if err != nil {
+			return logError(status.Errorf(codes.Internal,"cannot find laptop: %v",err))
+		}
+		if found == nil {
+			return logError(status.Errorf(codes.NotFound,"laptop %s is not found",laptopId))
+		}
+
+		rating, err := server.ratingStore.Add(laptopId, score)
+		if err != nil {
+			return logError(status.Errorf(codes.Internal,"cannot add rating to the store: %v",err))
+		}
+
+		res := &pb.RateLaptopResponse{
+			LaptopId:     laptopId,
+			RatedCount:   rating.Count,
+			AverageScore: rating.Sum / float64(rating.Count),
+		}
+
+		err = stream.Send(res)
+		if err != nil {
+			return logError(status.Errorf(codes.Unknown,"cannot send stream response: %v", err))
+		}
+	}
+	return nil
+}
+
 func contextError(ctx context.Context) error {
 	switch ctx.Err() {
 	case context.Canceled:
@@ -192,9 +247,10 @@ func logError(err error) error {
 	return err
 }
 
-func NewLaptopServer(laptopStore LaptopStore, imageStore ImageStore) *LaptopServer {
+func NewLaptopServer(laptopStore LaptopStore, imageStore ImageStore, ratingStore RatingStore) *LaptopServer {
 	return &LaptopServer{
 		laptopStore:                      laptopStore,
 		imageStore:                       imageStore,
+		ratingStore:                      ratingStore,
 	}
 }

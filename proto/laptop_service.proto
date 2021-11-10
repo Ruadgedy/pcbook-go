@@ -43,9 +43,21 @@ message UploadImageResponse{
   uint32 size = 2;
 }
 
+message RateLaptopRequest{
+  string laptop_id = 1;
+  double score = 2;
+}
+
+message RateLaptopResponse {
+  string laptop_id = 1;
+  uint32 rated_count = 2;   // The number of time this laptop was rated
+  double average_score = 3; // Average rated score
+}
+
 service LaptopService {
-  rpc CreateLaptop(CreateLaptopRequest) returns (CreateLaptopResponse) {};
-  rpc SearchLaptop(SearchLaptopRequest) returns (stream SearchLaptopResponse) {};
-  rpc UploadImage(stream UploadImageRequest) returns (UploadImageResponse) {};
+  rpc CreateLaptop(CreateLaptopRequest) returns (CreateLaptopResponse) {}; // unary 输入；unary 输出
+  rpc SearchLaptop(SearchLaptopRequest) returns (stream SearchLaptopResponse) {}; // unary 输入； stream 输出
+  rpc UploadImage(stream UploadImageRequest) returns (UploadImageResponse) {}; // stream 输入； unary 输出
+  rpc RateLaptop(stream RateLaptopRequest) returns (stream RateLaptopResponse) {};  // stream 输入； stream输出
 }
 
