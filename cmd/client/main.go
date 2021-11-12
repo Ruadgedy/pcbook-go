@@ -52,6 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatal("cannot dial server: ", err)
 	}
+	defer conn.Close()
 
 	laptopClient := pb.NewLaptopServiceClient(conn)
 
