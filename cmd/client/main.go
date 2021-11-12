@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/Ruadgedy/pcbook-go/client"
 	"github.com/Ruadgedy/pcbook-go/pb"
 	"github.com/Ruadgedy/pcbook-go/sample"
 	"google.golang.org/grpc"
@@ -42,21 +43,50 @@ func createLaptop(laptopClient pb.LaptopServiceClient, laptop *pb.Laptop) {
 	log.Printf("created laptop with id : %s", res.Id)
 }
 
+const (
+	username = "admin1"
+	password = "secret"
+	refreshDuration = 30 * time.Second
+)
+
+// 返回需要验证的方法
+func authMethods() map[string]bool {
+	const laptopServicePath = "/techschool.pcbook.LaptopService/"
+	return map[string]bool{
+		laptopServicePath + "CreateLaptop": true,
+		laptopServicePath + "UploadImage" : true,
+		laptopServicePath + "RateLaptop" : true,
+	}
+}
 func main() {
 	serverAddress := flag.String("address", "", "the server address")
 	flag.Parse()
 
 	log.Printf("dial server: %s", *serverAddress)
 
-	conn, err := grpc.Dial(*serverAddress, grpc.WithInsecure())
+	cc1, err := grpc.Dial(*serverAddress, grpc.WithInsecure())
 	if err != nil {
 		log.Fatal("cannot dial server: ", err)
 	}
-	defer conn.Close()
+	defer cc1.Close()
 
-	laptopClient := pb.NewLaptopServiceClient(conn)
+	authClient := client.NewAuthClient(cc1, username, password)
+	interceptor, err := client.NewAuthInterceptor(authClient, authMethods(), refreshDuration)
+	if err != nil {
+		log.Fatal("cannot create auth interceptor: ", err)
+	}
 
-	//testUploadImage(laptopClient)
+	cc2, err := grpc.Dial(
+		*serverAddress,
+		grpc.WithInsecure(),
+		grpc.WithUnaryInterceptor(interceptor.Unary()),
+		grpc.WithStreamInterceptor(interceptor.Stream()),
+	)
+	if err != nil {
+		log.Fatal("cannot dial server: ",err)
+	}
+
+	laptopClient := client.NewLaptopClient(cc2)
 	testRateLaptop(laptopClient)
 }
 
@@ -215,13 +245,13 @@ func rateLaptop(laptopClient pb.LaptopServiceClient, laptopIDs []string, scores 
 	return err
 }
 
-func testCreateLaptop(laptopClient pb.LaptopServiceClient)  {
-	createLaptop(laptopClient, sample.NewLaptop())
+func testCreateLaptop(laptopClient *client.LaptopClient)  {
+	laptopClient.CreateLaptop(sample.NewLaptop())
 }
 
-func testSearchLaptop(laptopClient pb.LaptopServiceClient) {
+func testSearchLaptop(laptopClient *client.LaptopClient) {
 	for i := 0; i < 10; i++ {
-		createLaptop(laptopClient, sample.NewLaptop())
+		laptopClient.CreateLaptop(sample.NewLaptop())
 	}
 
 	filter := &pb.Filter{
@@ -234,23 +264,23 @@ func testSearchLaptop(laptopClient pb.LaptopServiceClient) {
 		},
 	}
 
-	searchLaptop(laptopClient,filter)
+	laptopClient.SearchLaptop(filter)
 }
 
-func testUploadImage(laptopClient pb.LaptopServiceClient) {
+func testUploadImage(laptopClient *client.LaptopClient) {
 	laptop := sample.NewLaptop()
-	createLaptop(laptopClient, laptop)
-	uploadImage(laptopClient, laptop.GetId(), "tmp/laptop.jpg")
+	laptopClient.CreateLaptop(laptop)
+	laptopClient.UploadImage(laptop.GetId(), "tmp/laptop.jpg")
 }
 
-func testRateLaptop(laptopClient pb.LaptopServiceClient)  {
+func testRateLaptop(laptopClient *client.LaptopClient)  {
 	n := 3
 	laptopIDs := make([]string, n)
 
 	for i := 0; i < 3; i++ {
 		laptop := sample.NewLaptop()
 		laptopIDs[i] = laptop.GetId()
-		createLaptop(laptopClient,laptop)
+		laptopClient.CreateLaptop(laptop)
 	}
 
 	scores := make([]float64,n)
@@ -267,7 +297,7 @@ func testRateLaptop(laptopClient pb.LaptopServiceClient)  {
 			scores[i] = sample.RandomLaptopScore()
 		}
 
-		err := rateLaptop(laptopClient, laptopIDs, scores)
+		err := laptopClient.RateLaptop( laptopIDs, scores)
 		if err != nil {
 			log.Fatal(err)
 		}
