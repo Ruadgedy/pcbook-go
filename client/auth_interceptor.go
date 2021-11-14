@@ -30,6 +30,7 @@ func (interceptor *AuthInterceptor) Unary() grpc.UnaryClientInterceptor {
 		log.Printf("--> unary interceptor: %s", method)
 
 		if interceptor.authMethods[method] {
+			// 如果方法需要认证，则在context中加入token
 			return invoker(interceptor.attachToken(ctx),method,req,reply,cc,opts...)
 		}
 		return invoker(ctx,method,req,reply,cc,opts...)

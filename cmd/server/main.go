@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"github.com/Ruadgedy/pcbook-go/pb"
 	"github.com/Ruadgedy/pcbook-go/service"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
+	"io/ioutil"
 	"log"
 	"net"
 	"time"
@@ -42,6 +46,35 @@ func accessibleRoles() map[string][]string {
 	}
 }
 
+func loadTLSCredentials() (credentials.TransportCredentials, error) {
+	// Load certificate of the CA who signed server\s certificate
+	pemClientCA, err := ioutil.ReadFile("cert/ca-cert.pem")
+	if err != nil {
+		return nil,err
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(pemClientCA) {
+		return nil, fmt.Errorf("failed to add client CA's certificate")
+	}
+
+	// Load server's certificate and private key
+	serverCert, err := tls.LoadX509KeyPair("cert/ca-cert.pem", "cert/ca-key.pem")
+	if err != nil {
+		return nil,err
+	}
+
+	// Create the credentials and return it
+	config := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		//ClientAuth: tls.NoClientCert, // 这里我们定义client不需要认证，因为我们目前使用的是server端认证
+		ClientAuth: tls.RequireAndVerifyClientCert,  // 定义client也需要认证，即server需要验证client的证书
+		ClientCAs: certPool,    // 定义一组可信CA的证书，这些CA签名了client的证书
+	}
+
+	return credentials.NewTLS(config), nil
+}
+
 func main() {
 	port := flag.Int("port", 0, "the server port") // 返回值是指针类型
 	flag.Parse()
@@ -58,11 +91,16 @@ func main() {
 	jwtManager := service.NewJWTManager(secretKey, tokenDuration)
 	authServer := service.NewAuthServer(userStore, jwtManager)
 	interceptor := service.NewAuthInterceptor(jwtManager, accessibleRoles())
+	tlsCredentials, err := loadTLSCredentials() // 加载TLS凭证
+	if err != nil {
+		log.Fatal("cannot load TLS credentials: ",err)
+	}
 
 	laptopServer := service.NewLaptopServer(laptopStore, imageStore, ratingStore)
 	grpcServer := grpc.NewServer( // 创建新的gRPC服务器实例，但此时服务器实例未与我们定义的服务器注册绑定
 		grpc.UnaryInterceptor(interceptor.Unary()),    // 添加unary interceptor
 		grpc.StreamInterceptor(interceptor.Stream()),   // 添加stream interceptor
+		grpc.Creds(tlsCredentials), // 添加服务器连接的凭证
 	)
 	pb.RegisterLaptopServiceServer(grpcServer, laptopServer)    // 将我们自定义跌服务器与gRPC服务器绑定
 	pb.RegisterAuthServiceServer(grpcServer, authServer)    // 将我们自定义的认证服务器与gRPC服务器绑定

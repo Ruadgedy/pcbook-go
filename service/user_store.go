@@ -13,7 +13,7 @@ type UserStore interface{
 // InMemoryUserStore stores user in memory
 type InMemoryUserStore struct {
 	mutex sync.RWMutex
-	users map[string]*User
+	users map[string]*User // key为username
 }
 
 func (store *InMemoryUserStore) Save(user *User) error {
